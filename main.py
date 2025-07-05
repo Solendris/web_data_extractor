@@ -52,8 +52,8 @@ def clean_text(text):
     return cleaned
 
 
-def extract_tabbed_data(driver, url, page_name):
-    """Wyciąga dane z wszystkich zakładek na stronie"""
+def check_for_tabs(driver, url):
+    """Sprawdza czy strona ma zakładki i zwraca je"""
     try:
         driver.get(url)
         time.sleep(3)  # Czekamy na załadowanie strony
@@ -65,6 +65,8 @@ def extract_tabbed_data(driver, url, page_name):
             "[data-tab]",  # Elementy z atrybutem data-tab
             ".tab",  # Ogólne zakładki
             "button[role='tab']",  # ARIA tabs
+            ".wds-tabs__tab",  # Wikia/Fandom tabs
+            ".tabs-tabbox .tab",  # Inne warianty zakładek
         ]
         
         tabs_found = []
@@ -77,6 +79,18 @@ def extract_tabbed_data(driver, url, page_name):
                     break
             except:
                 continue
+        
+        return tabs_found
+        
+    except Exception as e:
+        print(f"Błąd sprawdzania zakładek: {e}")
+        return []
+
+
+def extract_tabbed_data(driver, url, page_name):
+    """Wyciąga dane z wszystkich zakładek na stronie"""
+    try:
+        tabs_found = check_for_tabs(driver, url)
         
         if not tabs_found:
             print(f"Nie znaleziono zakładek na stronie {page_name}")
@@ -371,15 +385,17 @@ for url in URLS:
     page_name = extract_page_name(url)
     data_extracted = False
     
-    # Sprawdzamy czy to strona z zakładkami (Aircraft_Carriers lub inne podobne)
-    if driver and ('aircraft_carriers' in page_name.lower() or 'carriers' in page_name.lower()):
-        print("Wykryto stronę z potencjalnymi zakładkami - używam Selenium...")
+    # SPRAWDZAMY KAŻDĄ STRONĘ POD KĄTEM ZAKŁADEK
+    if driver:
+        print("Sprawdzam czy strona ma zakładki...")
         tabbed_data_extracted = extract_tabbed_data(driver, url, page_name)
         if tabbed_data_extracted:
             data_extracted = True
+            print(f"✓ Pomyślnie wyciągnięto dane z zakładek dla {page_name}")
     
-    # Jeśli nie udało się z zakładkami lub to nie jest strona z zakładkami, używamy standardowego podejścia
+    # Jeśli nie udało się z zakładkami, używamy standardowego podejścia
     if not data_extracted:
+        print("Nie znaleziono zakładek lub nie udało się wyciągnąć danych z zakładek. Próbuję standardowe podejście...")
         try:
             response = requests.get(url, headers=headers)
             response.raise_for_status()
