@@ -19,6 +19,9 @@ headers = {"User-Agent": "Mozilla/5.0"}
 # Folder na wyniki - tylko jeden folder
 os.makedirs("output_tables", exist_ok=True)
 
+# Zbiór do śledzenia już przetworzonych kombinacji strona+zakładka
+processed_tabs = set()
+
 
 def setup_driver():
     """Konfiguruje i zwraca driver Selenium"""
@@ -50,6 +53,16 @@ def clean_text(text):
     # Usuwa znaki, które mogą powodować problemy w CSV
     cleaned = cleaned.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
     return cleaned
+
+
+def normalize_tab_name(tab_name):
+    """Normalizuje nazwę zakładki do porównywania"""
+    if not tab_name:
+        return ""
+    # Usuwa cyfry i znaki specjalne, zostawia tylko litery
+    normalized = re.sub(r'[^a-zA-Z\s]', '', tab_name.lower())
+    normalized = re.sub(r'\s+', '_', normalized.strip())
+    return normalized
 
 
 def check_for_tabs(driver, url):
@@ -97,13 +110,25 @@ def extract_tabbed_data(driver, url, page_name):
             return False
         
         all_data_extracted = False
+        tab_names_seen = set()  # Śledzenie już przetworzonych nazw zakładek
         
         # Przechodzimy przez każdą zakładkę
         for i, tab in enumerate(tabs_found):
             try:
                 # Pobieramy nazwę zakładki
-                tab_name = clean_text(tab.text) or f"Tab_{i+1}"
-                print(f"Przetwarzanie zakładki: {tab_name}")
+                raw_tab_name = clean_text(tab.text) or f"Tab_{i+1}"
+                normalized_name = normalize_tab_name(raw_tab_name)
+                
+                # Sprawdzamy czy już przetwarzaliśmy tę zakładkę
+                tab_key = f"{page_name}_{normalized_name}"
+                if tab_key in processed_tabs or normalized_name in tab_names_seen:
+                    print(f"Pomijam duplikat zakładki: {raw_tab_name}")
+                    continue
+                
+                tab_names_seen.add(normalized_name)
+                processed_tabs.add(tab_key)
+                
+                print(f"Przetwarzanie zakładki: {raw_tab_name} (normalized: {normalized_name})")
                 
                 # Klikamy w zakładkę
                 driver.execute_script("arguments[0].click();", tab)
@@ -113,7 +138,7 @@ def extract_tabbed_data(driver, url, page_name):
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
                 
                 # Wyciągamy dane z aktualnie aktywnej zakładki
-                tab_data_extracted = extract_tab_content(soup, page_name, tab_name, i+1)
+                tab_data_extracted = extract_tab_content(soup, page_name, raw_tab_name, normalized_name, i+1)
                 if tab_data_extracted:
                     all_data_extracted = True
                     
@@ -128,7 +153,7 @@ def extract_tabbed_data(driver, url, page_name):
         return False
 
 
-def extract_tab_content(soup, page_name, tab_name, tab_index):
+def extract_tab_content(soup, page_name, tab_name, normalized_name, tab_index):
     """Wyciąga zawartość z konkretnej zakładki i zapisuje w osobnym pliku"""
     data_extracted = False
     
@@ -149,10 +174,8 @@ def extract_tab_content(soup, page_name, tab_name, tab_index):
                 data.append(row_data)
 
         if len(data) > 1:
-            # Tworzymy nazwę pliku z nazwą zakładki - każda zakładka w osobnym pliku
-            safe_tab_name = re.sub(r'[^\w\s-]', '', tab_name).strip()
-            safe_tab_name = re.sub(r'[-\s]+', '_', safe_tab_name)
-            filename = f"output_tables/{page_name}_tab_{tab_index}_{safe_tab_name}_table_{table_index + 1}.csv"
+            # Używamy znormalizowanej nazwy do pliku
+            filename = f"output_tables/{page_name}_tab_{normalized_name}_table_{table_index + 1}.csv"
             
             try:
                 with open(filename, "w", newline='', encoding="utf-8") as f:
@@ -163,15 +186,15 @@ def extract_tab_content(soup, page_name, tab_name, tab_index):
             except Exception as e:
                 print(f"✗ Błąd zapisu tabeli z zakładki: {e}")
     
-    # Próbujemy też wyciągnąć dane z infobox w tej zakładce - osobny plik dla każdej zakładki
-    infobox_extracted = extract_infobox_data_from_tab(soup, page_name, tab_name, tab_index)
+    # Próbujemy też wyciągnąć dane z infobox w tej zakładce
+    infobox_extracted = extract_infobox_data_from_tab(soup, page_name, tab_name, normalized_name)
     if infobox_extracted:
         data_extracted = True
     
     return data_extracted
 
 
-def extract_infobox_data_from_tab(soup, page_name, tab_name, tab_index):
+def extract_infobox_data_from_tab(soup, page_name, tab_name, normalized_name):
     """Wyciąga dane z infobox w konkretnej zakładce i zapisuje w osobnym pliku"""
     stats_data = []
     
@@ -182,6 +205,9 @@ def extract_infobox_data_from_tab(soup, page_name, tab_name, tab_index):
         '.infobox',
         '.pi-data-value'
     ]
+    
+    # Zbiór do śledzenia już dodanych właściwości
+    properties_seen = set()
     
     for selector in infobox_selectors:
         infoboxes = soup.select(selector)
@@ -200,13 +226,16 @@ def extract_infobox_data_from_tab(soup, page_name, tab_name, tab_index):
                 if value_elem:
                     value = clean_text(value_elem.get_text())
                     readable_name = clean_text(data_source.replace('_', ' ').title())
-                    stats_data.append([readable_name, value])
+                    
+                    # Sprawdzamy czy już mamy tę właściwość
+                    property_key = readable_name.lower().strip()
+                    if property_key not in properties_seen:
+                        properties_seen.add(property_key)
+                        stats_data.append([readable_name, value])
     
     if stats_data:
-        # Każda zakładka ma swój osobny plik infobox
-        safe_tab_name = re.sub(r'[^\w\s-]', '', tab_name).strip()
-        safe_tab_name = re.sub(r'[-\s]+', '_', safe_tab_name)
-        filename = f"output_tables/{page_name}_tab_{tab_index}_{safe_tab_name}_infobox.csv"
+        # Używamy znormalizowanej nazwy do pliku
+        filename = f"output_tables/{page_name}_tab_{normalized_name}_infobox.csv"
         
         try:
             with open(filename, "w", newline='', encoding="utf-8") as f:
@@ -340,6 +369,9 @@ def extract_infobox_data(soup, page_name):
     if infobox:
         print(f"Znaleziono infobox dla {page_name}")
         
+        # Zbiór do śledzenia już dodanych właściwości
+        properties_seen = set()
+        
         # Szukamy wszystkich par data-source/wartość
         data_items = infobox.find_all('div', {'data-source': True})
         
@@ -351,8 +383,13 @@ def extract_infobox_data(soup, page_name):
             if value_elem:
                 value = clean_text(value_elem.get_text())
                 readable_name = clean_text(data_source.replace('_', ' ').title())
-                stats_data.append([readable_name, value])
-                print(f"Infobox - {readable_name}: {value}")
+                
+                # Sprawdzamy czy już mamy tę właściwość
+                property_key = readable_name.lower().strip()
+                if property_key not in properties_seen:
+                    properties_seen.add(property_key)
+                    stats_data.append([readable_name, value])
+                    print(f"Infobox - {readable_name}: {value}")
     
     if stats_data:
         filename = f"output_tables/{page_name}_infobox.csv"
@@ -469,4 +506,6 @@ if driver:
 
 print(f"\n{'='*50}")
 print("Zakończono przetwarzanie wszystkich stron.")
+print(f"Wyniki zapisane w folderze: output_tables/")
+print(f"Przetworzono {len(processed_tabs)} unikalnych zakładek.")
 print(f"{'='*50}")
