@@ -22,60 +22,69 @@ def extract_page_name(url):
     return url.strip("/").split("/")[-1].lower()
 
 
+def clean_text(text):
+    """Czyści tekst z niepotrzebnych znaków"""
+    if not text:
+        return ""
+    # Usuwa nadmiarowe białe znaki i znaki specjalne
+    cleaned = re.sub(r'\s+', ' ', str(text).strip())
+    # Usuwa znaki, które mogą powodować problemy w CSV
+    cleaned = cleaned.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+    return cleaned
+
+
 def extract_nuclear_rockets_data(soup, page_name):
     """Specjalna funkcja do wyciągania danych ze strony Nuclear_Rockets"""
     stats_data = []
     combat_data = []
     
     # Szukamy wszystkich elementów zawierających tekst
-    all_elements = soup.find_all(text=True)
+    all_text_elements = soup.find_all(string=True)  # Używamy string=True zamiast text=True
     
-    # Wzorce do rozpoznawania statystyk
+    # Wzorce do rozpoznawania statystyk - bardziej precyzyjne
     stat_patterns = {
-        'hitpoints': r'hitpoints?\s*(\d+)',
-        'speed': r'speed\s*(\d+)',
-        'attack': r'attack\s*(\d+)',
-        'range': r'range\s*(\d+)',
-        'view_range': r'view\s*range\s*(\d+)'
+        'Hitpoints': r'hitpoints?\s*[:\-]?\s*(\d+)',
+        'Speed': r'speed\s*[:\-]?\s*(\d+)',
+        'Attack': r'attack\s*[:\-]?\s*(\d+)', 
+        'Range': r'(?:attack\s+)?range\s*[:\-]?\s*(\d+)',
+        'View Range': r'view\s*range\s*[:\-]?\s*(\d+)'
     }
     
-    # Wzorce do rozpoznawania combat
+    # Wzorce do rozpoznawania combat - bardziej precyzyjne
     combat_patterns = {
-        'vs_unarmored': r'vs\.?\s*unarmored\s*(\d+)',
-        'vs_airplane': r'vs\.?\s*airplane\s*(\d+)', 
-        'vs_light_armor': r'vs\.?\s*light\s*armor\s*(\d+)',
-        'vs_heavy_armor': r'vs\.?\s*heavy\s*armor\s*(\d+)',
-        'vs_ship': r'vs\.?\s*ship\s*(\d+)',
-        'vs_submarine': r'vs\.?\s*submarine\s*(\d+)',
-        'vs_buildings': r'vs\.?\s*buildings?\s*(\d+)',
-        'vs_morale': r'vs\.?\s*morale\s*(\d+)'
+        'vs. Unarmored': r'vs\.?\s*unarmored\s*[:\-]?\s*(\d+)',
+        'vs. Airplane': r'vs\.?\s*airplane\s*[:\-]?\s*(\d+)', 
+        'vs. Light Armor': r'vs\.?\s*light\s*armor\s*[:\-]?\s*(\d+)',
+        'vs. Heavy Armor': r'vs\.?\s*heavy\s*armor\s*[:\-]?\s*(\d+)',
+        'vs. Ship': r'vs\.?\s*ship\s*[:\-]?\s*(\d+)',
+        'vs. Submarine': r'vs\.?\s*submarine\s*[:\-]?\s*(\d+)',
+        'vs. Buildings': r'vs\.?\s*buildings?\s*[:\-]?\s*(\d+)',
+        'vs. Morale': r'vs\.?\s*morale\s*[:\-]?\s*(\d+)'
     }
     
     # Łączymy cały tekst strony
-    full_text = ' '.join([elem.strip() for elem in all_elements if elem.strip()])
-    full_text = full_text.lower()
+    full_text = ' '.join([clean_text(elem) for elem in all_text_elements if elem and elem.strip()])
+    full_text_lower = full_text.lower()
     
     print(f"Analizuję tekst dla {page_name}...")
     
     # Wyciągamy statystyki podstawowe
     for stat_name, pattern in stat_patterns.items():
-        matches = re.findall(pattern, full_text, re.IGNORECASE)
+        matches = re.findall(pattern, full_text_lower, re.IGNORECASE)
         if matches:
             # Bierzemy pierwszą znalezioną wartość
-            value = matches[0]
-            readable_name = stat_name.replace('_', ' ').title()
-            stats_data.append([readable_name, value])
-            print(f"Znaleziono {readable_name}: {value}")
+            value = clean_text(matches[0])
+            stats_data.append([stat_name, value])
+            print(f"Znaleziono {stat_name}: {value}")
     
     # Wyciągamy dane combat
     for combat_name, pattern in combat_patterns.items():
-        matches = re.findall(pattern, full_text, re.IGNORECASE)
+        matches = re.findall(pattern, full_text_lower, re.IGNORECASE)
         if matches:
             # Bierzemy pierwszą znalezioną wartość
-            value = matches[0]
-            readable_name = combat_name.replace('_', ' ').replace('vs ', 'vs. ').title()
-            combat_data.append([readable_name, value])
-            print(f"Znaleziono {readable_name}: {value}")
+            value = clean_text(matches[0])
+            combat_data.append([combat_name, value])
+            print(f"Znaleziono {combat_name}: {value}")
     
     # Alternatywne podejście - szukamy w strukturze HTML
     if not stats_data and not combat_data:
@@ -85,35 +94,48 @@ def extract_nuclear_rockets_data(soup, page_name):
         containers = soup.find_all(['div', 'span', 'td', 'th', 'li'])
         
         for container in containers:
-            text = container.get_text(strip=True).lower()
+            text = clean_text(container.get_text()).lower()
             
             # Sprawdzamy czy zawiera interesujące nas dane
             if any(keyword in text for keyword in ['hitpoints', 'speed', 'attack', 'range', 'vs']):
                 # Próbujemy wyciągnąć liczby z tego kontenera
                 numbers = re.findall(r'\d+', text)
-                if numbers:
+                if numbers and len(text) < 100:  # Ignorujemy bardzo długie teksty
+                    clean_label = clean_text(text).title()
                     if 'vs' in text:
-                        combat_data.append([text.title(), numbers[0]])
+                        combat_data.append([clean_label, numbers[0]])
                     else:
-                        stats_data.append([text.title(), numbers[0]])
+                        stats_data.append([clean_label, numbers[0]])
     
     # Zapisujemy statystyki
     if stats_data:
         filename = f"output_stats/{page_name}_stats.csv"
-        with open(filename, "w", newline='', encoding="utf-8") as f:
-            writer = csv.writer(f, delimiter=",")
-            writer.writerow(["Statistic", "Value"])
-            writer.writerows(stats_data)
-        print(f"Zapisano statystyki: {filename}")
+        try:
+            with open(filename, "w", newline='', encoding="utf-8") as f:
+                writer = csv.writer(f, delimiter=",", quoting=csv.QUOTE_MINIMAL)
+                writer.writerow(["Statistic", "Value"])
+                for row in stats_data:
+                    # Upewniamy się, że każdy element jest stringiem
+                    clean_row = [clean_text(str(cell)) for cell in row]
+                    writer.writerow(clean_row)
+            print(f"✓ Zapisano statystyki: {filename}")
+        except Exception as e:
+            print(f"✗ Błąd zapisu statystyk: {e}")
     
     # Zapisujemy dane combat
     if combat_data:
         filename = f"output_stats/{page_name}_combat.csv"
-        with open(filename, "w", newline='', encoding="utf-8") as f:
-            writer = csv.writer(f, delimiter=",")
-            writer.writerow(["Combat Type", "Damage"])
-            writer.writerows(combat_data)
-        print(f"Zapisano dane combat: {filename}")
+        try:
+            with open(filename, "w", newline='', encoding="utf-8") as f:
+                writer = csv.writer(f, delimiter=",", quoting=csv.QUOTE_MINIMAL)
+                writer.writerow(["Combat Type", "Damage"])
+                for row in combat_data:
+                    # Upewniamy się, że każdy element jest stringiem
+                    clean_row = [clean_text(str(cell)) for cell in row]
+                    writer.writerow(clean_row)
+            print(f"✓ Zapisano dane combat: {filename}")
+        except Exception as e:
+            print(f"✗ Błąd zapisu combat: {e}")
     
     return len(stats_data) > 0 or len(combat_data) > 0
 
@@ -137,18 +159,25 @@ def extract_infobox_data(soup, page_name):
             # Szukamy wartości w tym elemencie
             value_elem = item.find('div', class_='pi-data-value')
             if value_elem:
-                value = value_elem.get_text(strip=True)
-                stats_data.append([data_source.replace('_', ' ').title(), value])
-                print(f"Infobox - {data_source}: {value}")
+                value = clean_text(value_elem.get_text())
+                readable_name = clean_text(data_source.replace('_', ' ').title())
+                stats_data.append([readable_name, value])
+                print(f"Infobox - {readable_name}: {value}")
     
     if stats_data:
         filename = f"output_stats/{page_name}_infobox.csv"
-        with open(filename, "w", newline='', encoding="utf-8") as f:
-            writer = csv.writer(f, delimiter=",")
-            writer.writerow(["Property", "Value"])
-            writer.writerows(stats_data)
-        print(f"Zapisano dane infobox: {filename}")
-        return True
+        try:
+            with open(filename, "w", newline='', encoding="utf-8") as f:
+                writer = csv.writer(f, delimiter=",", quoting=csv.QUOTE_MINIMAL)
+                writer.writerow(["Property", "Value"])
+                for row in stats_data:
+                    # Upewniamy się, że każdy element jest stringiem
+                    clean_row = [clean_text(str(cell)) for cell in row]
+                    writer.writerow(clean_row)
+            print(f"✓ Zapisano dane infobox: {filename}")
+            return True
+        except Exception as e:
+            print(f"✗ Błąd zapisu infobox: {e}")
     
     return False
 
@@ -158,10 +187,11 @@ for url in URLS:
     print(f"Przetwarzanie: {url}")
     print(f"{'='*50}")
     
-    response = requests.get(url, headers=headers)
-
-    if response.status_code != 200:
-        print(f"Błąd pobierania strony: {response.status_code}")
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()  # Rzuca wyjątek dla kodów błędów HTTP
+    except requests.RequestException as e:
+        print(f"Błąd pobierania strony: {e}")
         continue
 
     soup = BeautifulSoup(response.text, 'html.parser')
@@ -176,18 +206,20 @@ for url in URLS:
         data = []
         for row in table.find_all("tr"):
             cells = row.find_all(["td", "th"])
-            row_data = [cell.get_text(strip=True) for cell in cells]
+            row_data = [clean_text(cell.get_text()) for cell in cells]
             if row_data and any(cell.strip() for cell in row_data):  # Sprawdzamy czy wiersz nie jest pusty
                 data.append(row_data)
 
         if len(data) > 1:  # Tylko jeśli tabela ma więcej niż jeden wiersz
             filename = f"output_tables/{page_name}_table_{index + 1}.csv"
-            with open(filename, "w", newline='', encoding="utf-8") as f:
-                writer = csv.writer(f, delimiter=",")
-                writer.writerows(data)
-
-            print(f"Zapisano tabelę: {filename}")
-            data_extracted = True
+            try:
+                with open(filename, "w", newline='', encoding="utf-8") as f:
+                    writer = csv.writer(f, delimiter=",", quoting=csv.QUOTE_MINIMAL)
+                    writer.writerows(data)
+                print(f"✓ Zapisano tabelę: {filename}")
+                data_extracted = True
+            except Exception as e:
+                print(f"✗ Błąd zapisu tabeli: {e}")
     
     # Jeśli to strona Nuclear_Rockets, używamy specjalnej funkcji
     if 'nuclear_rockets' in page_name.lower():
@@ -207,9 +239,12 @@ for url in URLS:
         
         # Zapisujemy fragment HTML do analizy
         filename = f"output_stats/{page_name}_debug.html"
-        with open(filename, "w", encoding="utf-8") as f:
-            f.write(str(soup.prettify()))
-        print(f"Zapisano HTML do debugowania: {filename}")
+        try:
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(str(soup.prettify()))
+            print(f"Zapisano HTML do debugowania: {filename}")
+        except Exception as e:
+            print(f"Błąd zapisu HTML: {e}")
 
 print(f"\n{'='*50}")
 print("Zakończono przetwarzanie wszystkich stron.")
