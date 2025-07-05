@@ -7,10 +7,7 @@ import re
 import time
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 
 with open("source.json", "r", encoding="utf-8") as f:
@@ -118,7 +115,7 @@ def extract_tabbed_data(driver, url, page_name):
 
 
 def extract_tab_content(soup, page_name, tab_name, tab_index):
-    """Wyciąga zawartość z konkretnej zakładki"""
+    """Wyciąga zawartość z konkretnej zakładki i zapisuje w osobnym pliku"""
     data_extracted = False
     
     # Wyciągamy tabele z aktualnie widocznej zawartości
@@ -138,7 +135,7 @@ def extract_tab_content(soup, page_name, tab_name, tab_index):
                 data.append(row_data)
 
         if len(data) > 1:
-            # Tworzymy nazwę pliku z nazwą zakładki
+            # Tworzymy nazwę pliku z nazwą zakładki - każda zakładka w osobnym pliku
             safe_tab_name = re.sub(r'[^\w\s-]', '', tab_name).strip()
             safe_tab_name = re.sub(r'[-\s]+', '_', safe_tab_name)
             filename = f"output_tables/{page_name}_tab_{tab_index}_{safe_tab_name}_table_{table_index + 1}.csv"
@@ -152,7 +149,7 @@ def extract_tab_content(soup, page_name, tab_name, tab_index):
             except Exception as e:
                 print(f"✗ Błąd zapisu tabeli z zakładki: {e}")
     
-    # Próbujemy też wyciągnąć dane z infobox w tej zakładce
+    # Próbujemy też wyciągnąć dane z infobox w tej zakładce - osobny plik dla każdej zakładki
     infobox_extracted = extract_infobox_data_from_tab(soup, page_name, tab_name, tab_index)
     if infobox_extracted:
         data_extracted = True
@@ -161,7 +158,7 @@ def extract_tab_content(soup, page_name, tab_name, tab_index):
 
 
 def extract_infobox_data_from_tab(soup, page_name, tab_name, tab_index):
-    """Wyciąga dane z infobox w konkretnej zakładce"""
+    """Wyciąga dane z infobox w konkretnej zakładce i zapisuje w osobnym pliku"""
     stats_data = []
     
     # Szukamy aktywnych elementów infobox (nie ukrytych)
@@ -192,6 +189,7 @@ def extract_infobox_data_from_tab(soup, page_name, tab_name, tab_index):
                     stats_data.append([readable_name, value])
     
     if stats_data:
+        # Każda zakładka ma swój osobny plik infobox
         safe_tab_name = re.sub(r'[^\w\s-]', '', tab_name).strip()
         safe_tab_name = re.sub(r'[-\s]+', '_', safe_tab_name)
         filename = f"output_tables/{page_name}_tab_{tab_index}_{safe_tab_name}_infobox.csv"
