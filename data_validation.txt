@@ -1,6 +1,6 @@
 "https://call-of-war-by-bytro.fandom.com/wiki/Militia",				<-- 	git
 "https://call-of-war-by-bytro.fandom.com/wiki/Infantry",			<-- 	git
-"https://call-of-war-by-bytro.fandom.com/wiki/Motorized_Infantry",		<-- 
+"https://call-of-war-by-bytro.fandom.com/wiki/Motorized_Infantry",		<-- 	
 "https://call-of-war-by-bytro.fandom.com/wiki/Mechanized_Infantry",		<-- 
 "https://call-of-war-by-bytro.fandom.com/wiki/Commandos",			<-- 
 "https://call-of-war-by-bytro.fandom.com/wiki/Paratroopers",			<--
