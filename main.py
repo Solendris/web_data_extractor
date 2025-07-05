@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import csv
 import os
 import json
+import re
 
 
 with open("source.json", "r", encoding="utf-8") as f:
@@ -21,147 +22,142 @@ def extract_page_name(url):
     return url.strip("/").split("/")[-1].lower()
 
 
-def extract_stats_section(soup, page_name):
-    """Wyciąga sekcję ze statystykami jednostki (jak na stronie Nuclear_Rockets)"""
+def extract_nuclear_rockets_data(soup, page_name):
+    """Specjalna funkcja do wyciągania danych ze strony Nuclear_Rockets"""
     stats_data = []
+    combat_data = []
     
-    # Szukamy sekcji ze statystykami - może być w różnych kontenerach
-    possible_containers = [
-        soup.find('div', class_='pi-item-spacing'),
-        soup.find('div', class_='portable-infobox'),
-        soup.find('aside', class_='portable-infobox'),
-        soup.find('div', {'data-source': True}),
-    ]
+    # Szukamy wszystkich elementów zawierających tekst
+    all_elements = soup.find_all(text=True)
     
-    # Sprawdzamy każdy możliwy kontener
-    for container in possible_containers:
-        if not container:
-            continue
-            
-        # Szukamy par klucz-wartość w różnych formatach
-        stat_items = container.find_all(['div', 'li', 'tr'])
+    # Wzorce do rozpoznawania statystyk
+    stat_patterns = {
+        'hitpoints': r'hitpoints?\s*(\d+)',
+        'speed': r'speed\s*(\d+)',
+        'attack': r'attack\s*(\d+)',
+        'range': r'range\s*(\d+)',
+        'view_range': r'view\s*range\s*(\d+)'
+    }
+    
+    # Wzorce do rozpoznawania combat
+    combat_patterns = {
+        'vs_unarmored': r'vs\.?\s*unarmored\s*(\d+)',
+        'vs_airplane': r'vs\.?\s*airplane\s*(\d+)', 
+        'vs_light_armor': r'vs\.?\s*light\s*armor\s*(\d+)',
+        'vs_heavy_armor': r'vs\.?\s*heavy\s*armor\s*(\d+)',
+        'vs_ship': r'vs\.?\s*ship\s*(\d+)',
+        'vs_submarine': r'vs\.?\s*submarine\s*(\d+)',
+        'vs_buildings': r'vs\.?\s*buildings?\s*(\d+)',
+        'vs_morale': r'vs\.?\s*morale\s*(\d+)'
+    }
+    
+    # Łączymy cały tekst strony
+    full_text = ' '.join([elem.strip() for elem in all_elements if elem.strip()])
+    full_text = full_text.lower()
+    
+    print(f"Analizuję tekst dla {page_name}...")
+    
+    # Wyciągamy statystyki podstawowe
+    for stat_name, pattern in stat_patterns.items():
+        matches = re.findall(pattern, full_text, re.IGNORECASE)
+        if matches:
+            # Bierzemy pierwszą znalezioną wartość
+            value = matches[0]
+            readable_name = stat_name.replace('_', ' ').title()
+            stats_data.append([readable_name, value])
+            print(f"Znaleziono {readable_name}: {value}")
+    
+    # Wyciągamy dane combat
+    for combat_name, pattern in combat_patterns.items():
+        matches = re.findall(pattern, full_text, re.IGNORECASE)
+        if matches:
+            # Bierzemy pierwszą znalezioną wartość
+            value = matches[0]
+            readable_name = combat_name.replace('_', ' ').replace('vs ', 'vs. ').title()
+            combat_data.append([readable_name, value])
+            print(f"Znaleziono {readable_name}: {value}")
+    
+    # Alternatywne podejście - szukamy w strukturze HTML
+    if not stats_data and not combat_data:
+        print("Próbuję alternatywne podejście...")
         
-        for item in stat_items:
-            # Próbujemy wyciągnąć tekst z elementu
-            text = item.get_text(strip=True)
-            
-            # Sprawdzamy czy zawiera typowe statystyki
-            if any(keyword in text.lower() for keyword in ['hitpoints', 'speed', 'attack', 'range', 'vs.', 'combat']):
-                # Próbujemy podzielić na klucz i wartość
-                if ':' in text:
-                    parts = text.split(':', 1)
-                    if len(parts) == 2:
-                        stats_data.append([parts[0].strip(), parts[1].strip()])
-                elif text and len(text) > 2:
-                    # Jeśli nie ma dwukropka, zapisujemy jako pojedynczą wartość
-                    stats_data.append([text, ''])
-    
-    # Alternatywne podejście - szukamy konkretnych wzorców
-    if not stats_data:
-        # Szukamy wszystkich elementów zawierających liczby i statystyki
-        all_elements = soup.find_all(text=True)
-        current_stat = None
+        # Szukamy divów lub innych kontenerów z danymi
+        containers = soup.find_all(['div', 'span', 'td', 'th', 'li'])
         
-        for element in all_elements:
-            text = element.strip()
-            if not text:
-                continue
-                
-            # Sprawdzamy czy to nazwa statystyki
-            if any(keyword in text.lower() for keyword in ['hitpoints', 'speed', 'attack', 'range', 'view range']):
-                current_stat = text
-            # Sprawdzamy czy to wartość (liczba)
-            elif current_stat and (text.isdigit() or any(char.isdigit() for char in text)):
-                stats_data.append([current_stat, text])
-                current_stat = None
+        for container in containers:
+            text = container.get_text(strip=True).lower()
+            
+            # Sprawdzamy czy zawiera interesujące nas dane
+            if any(keyword in text for keyword in ['hitpoints', 'speed', 'attack', 'range', 'vs']):
+                # Próbujemy wyciągnąć liczby z tego kontenera
+                numbers = re.findall(r'\d+', text)
+                if numbers:
+                    if 'vs' in text:
+                        combat_data.append([text.title(), numbers[0]])
+                    else:
+                        stats_data.append([text.title(), numbers[0]])
     
-    # Zapisujemy dane jeśli coś znaleźliśmy
+    # Zapisujemy statystyki
     if stats_data:
         filename = f"output_stats/{page_name}_stats.csv"
         with open(filename, "w", newline='', encoding="utf-8") as f:
             writer = csv.writer(f, delimiter=",")
-            writer.writerow(["Statistic", "Value"])  # Nagłówek
+            writer.writerow(["Statistic", "Value"])
             writer.writerows(stats_data)
         print(f"Zapisano statystyki: {filename}")
-        return True
     
-    return False
-
-
-def extract_combat_section(soup, page_name):
-    """Wyciąga sekcję Combat z danymi vs. różne typy jednostek"""
-    combat_data = []
-    
-    # Szukamy sekcji Combat
-    combat_section = None
-    
-    # Różne sposoby znalezienia sekcji Combat
-    possible_selectors = [
-        soup.find('h3', string=lambda text: text and 'combat' in text.lower()),
-        soup.find('h2', string=lambda text: text and 'combat' in text.lower()),
-        soup.find('div', string=lambda text: text and 'combat' in text.lower()),
-        soup.find(text=lambda text: text and 'combat' in text.lower() if text else False)
-    ]
-    
-    for selector in possible_selectors:
-        if selector:
-            # Znajdź rodzica lub następny element zawierający dane
-            if hasattr(selector, 'find_next_sibling'):
-                combat_section = selector.find_next_sibling()
-            elif hasattr(selector, 'parent'):
-                combat_section = selector.parent
-            break
-    
-    if combat_section:
-        # Szukamy wszystkich elementów zawierających "vs."
-        vs_elements = combat_section.find_all(text=lambda text: text and 'vs.' in text.lower() if text else False)
-        
-        for vs_element in vs_elements:
-            # Próbujemy znaleźć powiązane wartości
-            parent = vs_element.parent if hasattr(vs_element, 'parent') else None
-            if parent:
-                # Szukamy liczb w tym samym kontenerze lub sąsiednich
-                numbers = []
-                for sibling in parent.find_all(text=True):
-                    if sibling.strip().isdigit():
-                        numbers.append(sibling.strip())
-                
-                if numbers:
-                    combat_data.append([vs_element.strip(), ' | '.join(numbers)])
-    
-    # Alternatywne podejście - szukamy wzorców "vs. X" w całym dokumencie
-    if not combat_data:
-        all_text = soup.get_text()
-        lines = all_text.split('\n')
-        
-        for i, line in enumerate(lines):
-            if 'vs.' in line.lower():
-                # Sprawdzamy następne linie w poszukiwaniu liczb
-                values = []
-                for j in range(1, 4):  # Sprawdzamy 3 następne linie
-                    if i + j < len(lines):
-                        next_line = lines[i + j].strip()
-                        if next_line.isdigit() or any(char.isdigit() for char in next_line):
-                            values.append(next_line)
-                
-                if values:
-                    combat_data.append([line.strip(), ' | '.join(values)])
-    
-    # Zapisujemy dane combat jeśli coś znaleźliśmy
+    # Zapisujemy dane combat
     if combat_data:
         filename = f"output_stats/{page_name}_combat.csv"
         with open(filename, "w", newline='', encoding="utf-8") as f:
             writer = csv.writer(f, delimiter=",")
-            writer.writerow(["Combat Type", "Values"])  # Nagłówek
+            writer.writerow(["Combat Type", "Damage"])
             writer.writerows(combat_data)
         print(f"Zapisano dane combat: {filename}")
+    
+    return len(stats_data) > 0 or len(combat_data) > 0
+
+
+def extract_infobox_data(soup, page_name):
+    """Wyciąga dane z infobox (portable-infobox)"""
+    stats_data = []
+    
+    # Szukamy infobox
+    infobox = soup.find('aside', class_='portable-infobox') or soup.find('div', class_='portable-infobox')
+    
+    if infobox:
+        print(f"Znaleziono infobox dla {page_name}")
+        
+        # Szukamy wszystkich par data-source/wartość
+        data_items = infobox.find_all('div', {'data-source': True})
+        
+        for item in data_items:
+            data_source = item.get('data-source', '')
+            
+            # Szukamy wartości w tym elemencie
+            value_elem = item.find('div', class_='pi-data-value')
+            if value_elem:
+                value = value_elem.get_text(strip=True)
+                stats_data.append([data_source.replace('_', ' ').title(), value])
+                print(f"Infobox - {data_source}: {value}")
+    
+    if stats_data:
+        filename = f"output_stats/{page_name}_infobox.csv"
+        with open(filename, "w", newline='', encoding="utf-8") as f:
+            writer = csv.writer(f, delimiter=",")
+            writer.writerow(["Property", "Value"])
+            writer.writerows(stats_data)
+        print(f"Zapisano dane infobox: {filename}")
         return True
     
     return False
 
 
 for url in URLS:
-    print(f"\nPrzetwarzanie: {url}")
+    print(f"\n{'='*50}")
+    print(f"Przetwarzanie: {url}")
+    print(f"{'='*50}")
+    
     response = requests.get(url, headers=headers)
 
     if response.status_code != 200:
@@ -171,43 +167,50 @@ for url in URLS:
     soup = BeautifulSoup(response.text, 'html.parser')
     page_name = extract_page_name(url)
     
+    data_extracted = False
+    
     # Próbujemy wyciągnąć standardowe tabele
     tables = soup.find_all("table")
-    table_found = False
     
     for index, table in enumerate(tables):
         data = []
         for row in table.find_all("tr"):
             cells = row.find_all(["td", "th"])
             row_data = [cell.get_text(strip=True) for cell in cells]
-            if row_data:
+            if row_data and any(cell.strip() for cell in row_data):  # Sprawdzamy czy wiersz nie jest pusty
                 data.append(row_data)
 
-        if not data:
-            continue
+        if len(data) > 1:  # Tylko jeśli tabela ma więcej niż jeden wiersz
+            filename = f"output_tables/{page_name}_table_{index + 1}.csv"
+            with open(filename, "w", newline='', encoding="utf-8") as f:
+                writer = csv.writer(f, delimiter=",")
+                writer.writerows(data)
 
-        filename = f"output_tables/{page_name}_table_{index + 1}.csv"
-        with open(filename, "w", newline='', encoding="utf-8") as f:
-            writer = csv.writer(f, delimiter=",")
-            writer.writerows(data)
-
-        print(f"Zapisano tabelę: {filename}")
-        table_found = True
+            print(f"Zapisano tabelę: {filename}")
+            data_extracted = True
     
-    # Jeśli nie znaleźliśmy standardowych tabel, próbujemy wyciągnąć sekcje statystyk
-    if not table_found:
-        print(f"Nie znaleziono standardowych tabel dla {page_name}, próbuję wyciągnąć sekcje statystyk...")
+    # Jeśli to strona Nuclear_Rockets, używamy specjalnej funkcji
+    if 'nuclear_rockets' in page_name.lower():
+        print("Wykryto stronę Nuclear_Rockets - używam specjalnej funkcji...")
+        nuclear_data_extracted = extract_nuclear_rockets_data(soup, page_name)
+        if nuclear_data_extracted:
+            data_extracted = True
+    
+    # Próbujemy wyciągnąć dane z infobox
+    infobox_extracted = extract_infobox_data(soup, page_name)
+    if infobox_extracted:
+        data_extracted = True
+    
+    # Jeśli nic nie znaleźliśmy, zapisujemy surowy tekst
+    if not data_extracted:
+        print(f"Nie udało się wyciągnąć żadnych danych ze strony {page_name}")
         
-        stats_extracted = extract_stats_section(soup, page_name)
-        combat_extracted = extract_combat_section(soup, page_name)
-        
-        if not stats_extracted and not combat_extracted:
-            print(f"Nie udało się wyciągnąć żadnych danych ze strony {page_name}")
-            
-            # Zapisujemy surowy tekst do analizy
-            filename = f"output_stats/{page_name}_raw_text.txt"
-            with open(filename, "w", encoding="utf-8") as f:
-                f.write(soup.get_text())
-            print(f"Zapisano surowy tekst do analizy: {filename}")
+        # Zapisujemy fragment HTML do analizy
+        filename = f"output_stats/{page_name}_debug.html"
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(str(soup.prettify()))
+        print(f"Zapisano HTML do debugowania: {filename}")
 
-print("\nZakończono przetwarzanie wszystkich stron.")
+print(f"\n{'='*50}")
+print("Zakończono przetwarzanie wszystkich stron.")
+print(f"{'='*50}")
