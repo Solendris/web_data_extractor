@@ -12,9 +12,8 @@ with open("source.json", "r", encoding="utf-8") as f:
 
 headers = {"User-Agent": "Mozilla/5.0"}
 
-# Folder na wyniki
+# Folder na wyniki - tylko jeden folder
 os.makedirs("output_tables", exist_ok=True)
-os.makedirs("output_stats", exist_ok=True)
 
 
 def extract_page_name(url):
@@ -39,7 +38,7 @@ def extract_nuclear_rockets_data(soup, page_name):
     combat_data = []
     
     # Szukamy wszystkich elementów zawierających tekst
-    all_text_elements = soup.find_all(string=True)  # Używamy string=True zamiast text=True
+    all_text_elements = soup.find_all(string=True)
     
     # Wzorce do rozpoznawania statystyk - bardziej precyzyjne
     stat_patterns = {
@@ -107,9 +106,9 @@ def extract_nuclear_rockets_data(soup, page_name):
                     else:
                         stats_data.append([clean_label, numbers[0]])
     
-    # Zapisujemy statystyki
+    # Zapisujemy statystyki do output_tables
     if stats_data:
-        filename = f"output_stats/{page_name}_stats.csv"
+        filename = f"output_tables/{page_name}_stats.csv"
         try:
             with open(filename, "w", newline='', encoding="utf-8") as f:
                 writer = csv.writer(f, delimiter=",", quoting=csv.QUOTE_MINIMAL)
@@ -122,9 +121,9 @@ def extract_nuclear_rockets_data(soup, page_name):
         except Exception as e:
             print(f"✗ Błąd zapisu statystyk: {e}")
     
-    # Zapisujemy dane combat
+    # Zapisujemy dane combat do output_tables
     if combat_data:
-        filename = f"output_stats/{page_name}_combat.csv"
+        filename = f"output_tables/{page_name}_combat.csv"
         try:
             with open(filename, "w", newline='', encoding="utf-8") as f:
                 writer = csv.writer(f, delimiter=",", quoting=csv.QUOTE_MINIMAL)
@@ -165,7 +164,7 @@ def extract_infobox_data(soup, page_name):
                 print(f"Infobox - {readable_name}: {value}")
     
     if stats_data:
-        filename = f"output_stats/{page_name}_infobox.csv"
+        filename = f"output_tables/{page_name}_infobox.csv"
         try:
             with open(filename, "w", newline='', encoding="utf-8") as f:
                 writer = csv.writer(f, delimiter=",", quoting=csv.QUOTE_MINIMAL)
@@ -233,12 +232,12 @@ for url in URLS:
     if infobox_extracted:
         data_extracted = True
     
-    # Jeśli nic nie znaleźliśmy, zapisujemy surowy tekst
+    # Jeśli nic nie znaleźliśmy, zapisujemy surowy tekst do output_tables
     if not data_extracted:
         print(f"Nie udało się wyciągnąć żadnych danych ze strony {page_name}")
         
-        # Zapisujemy fragment HTML do analizy
-        filename = f"output_stats/{page_name}_debug.html"
+        # Zapisujemy fragment HTML do analizy w output_tables
+        filename = f"output_tables/{page_name}_debug.html"
         try:
             with open(filename, "w", encoding="utf-8") as f:
                 f.write(str(soup.prettify()))
